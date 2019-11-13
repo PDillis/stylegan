@@ -100,7 +100,7 @@ def autosummary(name: str, value: TfExpressionEx, passthru: TfExpressionEx = Non
     else:  # python scalar or numpy array
         if name not in _immediate:
             with tfutil.absolute_name_scope("Autosummary/" + name_id), tf.device(None), tf.control_dependencies(None):
-                update_value = tf.placeholder(_dtype)
+                update_value = tf.compat.v1.placeholder(_dtype)
                 update_op = _create_var(name, update_value)
                 _immediate[name] = update_op, update_value
 
@@ -134,9 +134,9 @@ def finalize_autosummaries() -> None:
                     with tf.name_scope(None), tf.control_dependencies(reset_ops):  # reset before reporting
                         mean = moments[1]
                         std = tf.sqrt(moments[2] - tf.square(moments[1]))
-                        tf.summary.scalar(name, mean)
-                        tf.summary.scalar("xCustomScalars/" + name + "/margin_lo", mean - std)
-                        tf.summary.scalar("xCustomScalars/" + name + "/margin_hi", mean + std)
+                        tf.compat.v1.summary.scalar(name, mean)
+                        tf.compat.v1.summary.scalar("xCustomScalars/" + name + "/margin_lo", mean - std)
+                        tf.compat.v1.summary.scalar("xCustomScalars/" + name + "/margin_hi", mean + std)
 
     # Group by category and chart name.
     cat_dict = OrderedDict()
@@ -179,6 +179,6 @@ def save_summaries(file_writer, global_step=None):
         if layout is not None:
             file_writer.add_summary(layout)
         with tf.device(None), tf.control_dependencies(None):
-            _merge_op = tf.summary.merge_all()
+            _merge_op = tf.compat.v1.summary.merge_all()
 
     file_writer.add_summary(_merge_op.eval(), global_step)

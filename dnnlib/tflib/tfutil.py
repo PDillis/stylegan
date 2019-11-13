@@ -23,7 +23,7 @@ TfExpressionEx = Union[TfExpression, int, float, np.ndarray]
 def run(*args, **kwargs) -> Any:
     """Run the specified ops in the default session."""
     assert_tf_initialized()
-    return tf.get_default_session().run(*args, **kwargs)
+    return tf.compat.v1.get_default_session().run(*args, **kwargs)
 
 
 def is_tf_expression(x: Any) -> bool:
@@ -31,7 +31,7 @@ def is_tf_expression(x: Any) -> bool:
     return isinstance(x, (tf.Tensor, tf.Variable, tf.Operation))
 
 
-def shape_to_list(shape: Iterable[tf.Dimension]) -> List[Union[int, None]]:
+def shape_to_list(shape: Iterable[tf.compat.v1.Dimension]) -> List[Union[int, None]]:
     """Convert a Tensorflow shape to a list of ints."""
     return [dim.value for dim in shape]
 
@@ -71,9 +71,9 @@ def absolute_name_scope(scope: str) -> tf.name_scope:
     return tf.name_scope(scope + "/")
 
 
-def absolute_variable_scope(scope: str, **kwargs) -> tf.variable_scope:
+def absolute_variable_scope(scope: str, **kwargs) -> tf.compat.v1.variable_scope:
     """Forcefully enter the specified variable scope, ignoring any surrounding scopes."""
-    return tf.variable_scope(tf.VariableScope(name=scope, **kwargs), auxiliary_name_scope=False)
+    return tf.compat.v1.variable_scope(tf.compat.v1.VariableScope(name=scope, **kwargs), auxiliary_name_scope=False)
 
 
 def _sanitize_tf_config(config_dict: dict = None) -> dict:
@@ -94,7 +94,7 @@ def _sanitize_tf_config(config_dict: dict = None) -> dict:
 def init_tf(config_dict: dict = None) -> None:
     """Initialize TensorFlow session using good default settings."""
     # Skip if already initialized.
-    if tf.get_default_session() is not None:
+    if tf.compat.v1.get_default_session() is not None:
         return
 
     # Setup config dict and random seeds.
@@ -106,7 +106,7 @@ def init_tf(config_dict: dict = None) -> None:
     if tf_random_seed == "auto":
         tf_random_seed = np.random.randint(1 << 31)
     if tf_random_seed is not None:
-        tf.set_random_seed(tf_random_seed)
+        tf.compat.v1.set_random_seed(tf_random_seed)
 
     # Setup environment variables.
     for key, value in list(cfg.items()):
@@ -121,15 +121,15 @@ def init_tf(config_dict: dict = None) -> None:
 
 def assert_tf_initialized():
     """Check that TensorFlow session has been initialized."""
-    if tf.get_default_session() is None:
+    if tf.compat.v1.get_default_session() is None:
         raise RuntimeError("No default TensorFlow session found. Please call dnnlib.tflib.init_tf().")
 
 
-def create_session(config_dict: dict = None, force_as_default: bool = False) -> tf.Session:
+def create_session(config_dict: dict = None, force_as_default: bool = False) -> tf.compat.v1.Session:
     """Create tf.Session based on config dict."""
     # Setup TensorFlow config proto.
     cfg = _sanitize_tf_config(config_dict)
-    config_proto = tf.ConfigProto()
+    config_proto = tf.compat.v1.ConfigProto()
     for key, value in cfg.items():
         fields = key.split(".")
         if fields[0] not in ["rnd", "env"]:
@@ -139,7 +139,7 @@ def create_session(config_dict: dict = None, force_as_default: bool = False) -> 
             setattr(obj, fields[-1], value)
 
     # Create session.
-    session = tf.Session(config=config_proto)
+    session = tf.compat.v1.Session(config=config_proto)
     if force_as_default:
         # pylint: disable=protected-access
         session._default_session = session.as_default()
@@ -167,7 +167,7 @@ def init_uninitialized_vars(target_vars: List[tf.Variable] = None) -> None:
             assert is_tf_expression(var)
 
             try:
-                tf.get_default_graph().get_tensor_by_name(var.name.replace(":0", "/IsVariableInitialized:0"))
+                tf.compat.v1.get_default_graph().get_tensor_by_name(var.name.replace(":0", "/IsVariableInitialized:0"))
             except KeyError:
                 # Op does not exist => variable may be uninitialized.
                 test_vars.append(var)
@@ -183,7 +183,7 @@ def set_vars(var_to_value_dict: dict) -> None:
     """Set the values of given tf.Variables.
 
     Equivalent to the following, but more efficient and does not bloat the tf graph:
-    tflib.run([tf.assign(var, value) for var, value in var_to_value_dict.items()]
+    tflib.run([tf.compat.v1.assign(var, value) for var, value in var_to_value_dict.items()]
     """
     assert_tf_initialized()
     ops = []
@@ -193,11 +193,11 @@ def set_vars(var_to_value_dict: dict) -> None:
         assert is_tf_expression(var)
 
         try:
-            setter = tf.get_default_graph().get_tensor_by_name(var.name.replace(":0", "/setter:0"))  # look for existing op
+            setter = tf.compat.v1.get_default_graph().get_tensor_by_name(var.name.replace(":0", "/setter:0"))  # look for existing op
         except KeyError:
             with absolute_name_scope(var.name.split(":")[0]):
                 with tf.control_dependencies(None):  # ignore surrounding control_dependencies
-                    setter = tf.assign(var, tf.placeholder(var.dtype, var.shape, "new_value"), name="setter")  # create new setter
+                    setter = tf.compat.v1.assign(var, tf.compat.v1.placeholder(var.dtype, var.shape, "new_value"), name="setter")  # create new setter
 
         ops.append(setter)
         feed_dict[setter.op.inputs[1]] = value
