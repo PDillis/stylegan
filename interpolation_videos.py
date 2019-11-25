@@ -191,8 +191,58 @@ def generate_style_transfer_video(
         mp4_file, fps=mp4_fps, codec=mp4_codec, bitrate=mp4_bitrate
     )
 
+def my_circular_interpolation(
+    save_path,
+    Gs,
+    mp4_file,
+    duration_sec,
+    radius=10.0,
+    mp4_fps=30,
+    mp4_codec="libx264",
+    mp4_bitrate="5M",
+    seed=1000,
+):
+    # Set random seed:
+    random_state = np.random.RandomState(seed)
+    # Choose two random dims on which to get the circle (from [0, 511]):
+    z1, z2 = random_state.choice(Gs.input_shape[1], 2, replace=False)
+
+    def get_z_coords(radius, theta):
+        # Basic Polar coordinates to Cartesian:
+        return radius * np.cos(theta), radius * np.sin(theta)
+
+    # Total number of frames:
+    no_frames = mp4_fps * duration_sec + 1
+    def get_angles(no_frames):
+        d_theta = 2 * np.pi / no_frames
+        angles = np.arange(0, 2 * np.pi + d_theta, d_theta)
+        return angles
+
+    angles = get_angles(no_frames)
+    # Thanks to NumPy's broadcast, we can simply do the following:
+    Z1, Z2 = get_z_coords(radius, angles)
+    # All of our frames will be appended to:
+    frames = []
+    # output transformation; convert to uint8 and change channel order:
+    fmt = dict(func=tflib.convert_images_to_uint8, nchw_to_nhwc=True)
+
+    for i in range(len(Z1)):
+        # All the dims will be zero:
+        Z = np.array([np.zeros(Gs.input_shape[1])])
+        # We will now replace the generated Z1 and Z2 into Z
+        Z[0][z1] = Z1[i]
+        Z[0][z2] = Z2[i]
+        img = Gs.run(Z, None, truncation_psi=0.7, randomize_noise=False, output_transform=fmt)[0]
+        frames.append(img)
+
+    frames = moviepy.editor.ImageSequenceClip(frames, fps=mp4_fps)
+    frames.write_videofile(mp4_file, fps=mp4_fps, codec=mp4_codec, bitrate=mp4_bitrate)
+
+
 # From Snowy Halcy: https://github.com/halcy/stylegan/blob/master/Stylegan-Generate-Encode.ipynb
-# with my modifications:
+# with my (minor) modifications. If you like this brute-force approach better, then be my guest.
+# The problem I found is that the length of the video is not always the same and can simply loop
+# back into frames it has already generated (due to the brute force):
 def generate_circular_interpolation_video(
     save_path,
     Gs,
@@ -272,10 +322,10 @@ def main(
     model_path,
     seed,
     size,
-    dst_seeds=42,
+    dst_seeds,
     cols=3,
     rows=2,
-    duration=30.0,
+    duration_sec=30.0,
     random=False,
     coarse=False,
     middle=False,
@@ -315,7 +365,7 @@ def main(
             Gs=Gs,
             cols=cols,
             rows=rows,
-            duration_sec=duration,
+            duration_sec=duration_sec,
             image_shrink=1,
             image_zoom=1,
             smoothing_sec=3.0,
@@ -338,7 +388,7 @@ def main(
             dst_seeds=dst_seeds,
             image_shrink=1,
             image_zoom=1,
-            duration_sec=duration,
+            duration_sec=duration_sec,
             smoothing_sec=3.0,
             mp4_fps=30,
             mp4_codec="libx264",
@@ -359,7 +409,7 @@ def main(
             dst_seeds=dst_seeds,
             image_shrink=1,
             image_zoom=1,
-            duration_sec=duration,
+            duration_sec=duration_sec,
             smoothing_sec=3.0,
             mp4_fps=30,
             mp4_codec="libx264",
@@ -380,7 +430,7 @@ def main(
             dst_seeds=dst_seeds,
             image_shrink=1,
             image_zoom=1,
-            duration_sec=duration,
+            duration_sec=duration_sec,
             smoothing_sec=3.0,
             mp4_fps=30,
             mp4_codec="libx264",
@@ -389,16 +439,18 @@ def main(
             minibatch_size=8,
         )
     if circular:
-        mp4_file = save_path + 'seed_{}-circular.mp4'.format(seed)
+        mp4_file = save_path + 'seed_{}-my-circular.mp4'.format(seed)
         print("Generating circular interpolation video! Frames are being generated (please be patient):\n")
-        generate_circular_interpolation_video(
+        my_circular_interpolation(
             save_path=save_path,
             Gs=Gs,
             mp4_file=mp4_file,
+            duration_sec=duration_sec,
+            radius=10.0,
             mp4_fps=30,
             mp4_codec="libx264",
             mp4_bitrate="5M",
-            seed=1000,
+            seed=seed,
         )
 
 
@@ -427,8 +479,8 @@ You can generate all the videos by simply adding the --generate_all flag. Have f
         "--dst_seeds",
         nargs="+",
         type=int,
-        help="Source A seeds. These will be fixed. Input like so: --dst_seed 42 56 1...",
-        default=42
+        help="Source A seeds. These will be fixed. Input like so: --dst_seed 700 198 42 ...",
+        default=[700, 198]
     )
     parser.add_argument(
         "--size",
@@ -447,6 +499,12 @@ You can generate all the videos by simply adding the --generate_all flag. Have f
         type=int,
         help="Rows in the random interpolation video (optional).",
         default=2,
+    )
+    parser.add_argument(
+        "--duration_sec",
+        type=float,
+        help="Duration in seconds (float) of the generated videos.",
+        default=30.0,
     )
     parser.add_argument(
         "--random",
@@ -498,6 +556,7 @@ if __name__ == "__main__":
         random=args.random,
         cols=args.cols,
         rows=args.rows,
+        duration_sec=args.duration_sec,
         coarse=args.coarse,
         middle=args.middle,
         fine=args.fine,
