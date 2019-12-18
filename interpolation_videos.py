@@ -2,9 +2,12 @@
 
 import os
 import pickle
+
 import argparse
 from argparse import RawTextHelpFormatter
+
 import re
+from tqdm import tqdm
 
 import numpy as np
 import scipy
@@ -69,12 +72,14 @@ def generate_interpolation_video(
 
     print("Generating latent vectors...")
     grid_size = [cols, rows]
-    # [frame, image, channel, component]:
+    # Get the shape of the latents: [frames, cols*rows, input_shape]:
     shape = [num_frames, np.prod(grid_size)] + Gs.input_shape[1:]
     all_latents = random_state.randn(*shape).astype(np.float32)
+    # mode='wrap' will basically make the generated video to loop:
     all_latents = scipy.ndimage.gaussian_filter(
         all_latents, [smoothing_sec * mp4_fps] + [0] * len(Gs.input_shape), mode="wrap"
     )
+    # This will make transitions smoother and less jumpy (lest the model is overfit):
     all_latents /= np.sqrt(np.mean(np.square(all_latents)))
 
     # Frame generation func for moviepy.
@@ -125,24 +130,28 @@ def generate_style_transfer_video(
     seed=1000,
     minibatch_size=8,
 ):
+    # Round to nearest integer then convert to int:
     num_frames = int(np.rint(duration_sec * mp4_fps))
     random_state = np.random.RandomState(seed)
 
-    width = size
-    height = size
+    # Our images will be square of same size, so:
+    width = height = size
 
+    # Our transformations that we will pass to the Generator Gs:
     fmt = dict(func=tflib.convert_images_to_uint8, nchw_to_nhwc=True)
     synthesis_kwargs = dict(
         output_transform=fmt, truncation_psi=0.7, minibatch_size=minibatch_size
     )
 
-    shape = [num_frames] + Gs.input_shape[1:]  # [frame, image, channel, component]
-    src_latents = random_state.randn(*shape).astype(np.float32)  # Source B in Figure 3
+    shape = [num_frames] + Gs.input_shape[1:]  # [frames, image, channel, component]
+    # Source B in Figure 3
+    src_latents = random_state.randn(*shape).astype(np.float32)
     src_latents = scipy.ndimage.gaussian_filter(
         src_latents, smoothing_sec * mp4_fps, mode="wrap"
     )
     src_latents /= np.sqrt(np.mean(np.square(src_latents)))
 
+    # Source A in Figure 3
     dst_latents = np.stack(
         np.random.RandomState(seed).randn(Gs.input_shape[1]) for seed in dst_seeds
     )
@@ -207,12 +216,15 @@ def my_circular_interpolation(
     # Choose two random dims on which to get the circle (from [0, 511]):
     z1, z2 = random_state.choice(Gs.input_shape[1], 2, replace=False)
 
+    # Basic Polar coordinates to Cartesian (fun experiments can be done here,
+    # like moving in a spiral or a cardioid/limaçon):
     def get_z_coords(radius, theta):
-        # Basic Polar coordinates to Cartesian:
         return radius * np.cos(theta), radius * np.sin(theta)
 
-    # Total number of frames:
-    no_frames = mp4_fps * duration_sec + 1
+    # Total number of frames (round to nearest integer then convert to int):
+    no_frames = int(np.rint(duration_sec * mp4_fps))
+
+    # Get the angles by equally partitioninig the circle (fun exp. as well):
     def get_angles(no_frames):
         d_theta = 2 * np.pi / no_frames
         angles = np.arange(0, 2 * np.pi + d_theta, d_theta)
@@ -226,23 +238,29 @@ def my_circular_interpolation(
     # output transformation; convert to uint8 and change channel order:
     fmt = dict(func=tflib.convert_images_to_uint8, nchw_to_nhwc=True)
 
-    for i in range(len(Z1)):
+    for i in tqdm(range(len(Z1)), desc='Going around the circle'):
         # All the dims will be zero:
         Z = np.array([np.zeros(Gs.input_shape[1])])
         # We will now replace the generated Z1 and Z2 into Z
         Z[0][z1] = Z1[i]
         Z[0][z2] = Z2[i]
+        # Generate the image:
         img = Gs.run(Z, None, truncation_psi=0.7, randomize_noise=False, output_transform=fmt)[0]
+        # Append it:
         frames.append(img)
 
+    # Generate the sequence from the images:
     frames = moviepy.editor.ImageSequenceClip(frames, fps=mp4_fps)
+    # Write the mp4 file with selected codec and bitrate:
     frames.write_videofile(mp4_file, fps=mp4_fps, codec=mp4_codec, bitrate=mp4_bitrate)
 
 
 # From Snowy Halcy: https://github.com/halcy/stylegan/blob/master/Stylegan-Generate-Encode.ipynb
-# with my (minor) modifications. If you like this brute-force approach better, then be my guest.
-# The problem I found is that the length of the video is not always the same and can simply loop
-# back into frames it has already generated (due to the brute force):
+# with my (minor) modifications. If you like this brute-force approach better,
+# then be my guest. The problem I found is that the length of the video is not
+# always the same and sometimes it goes back into frames it has already generated
+# due to the brute force approach; it does generate pretty stable videos, even for
+# overfit models:
 def generate_circular_interpolation_video(
     save_path,
     Gs,

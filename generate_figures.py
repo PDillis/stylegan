@@ -352,7 +352,7 @@ def parse():
     parser.add_argument(
         "--model_path",
         type=str,
-        help="Path to pretrained model.",
+        help="Path to pretrained model; can be a URL to download the model (e.g., Drive)",
         required=True
     )
     parser.add_argument(
